@@ -2,16 +2,47 @@ library(tidyverse)
 wahlrecht_base <- "https://www.wahlrecht.de/umfragen/"
 non_numeric_cols <- c("date", "survey_period", "institute", "type")
 
+
+party_colors <- c(
+  "#000000", # black
+  "#E3000F", # red (SPD Corporate Design Manual 4/2015)
+  "#46962b", # green (Das Grüne Corporate Design 1/2017)
+  "#ffed00", # yellow (FDP Gestaltungsrichtlinien 10/2016)
+  "#FF0000", # red (Zum Umgang mit der Marke DIE LINKE 5/2007)
+  "#009ee0", # light blue (AfD Corporate Design 3/2017)
+  "#808080", # grey
+  "#404040", # dark grey
+  "#FF8800", # orange (Styleguide Piratenpartei Deutschland 2015)
+  "#353A90" # blue (Corporate Identity Freie Wähler Hessen 2016)
+)
+names(party_colors) <- c(
+  "cdu_csu",
+  "spd",
+  "gruene",
+  "fdp",
+  "linke",
+  "afd",
+  "others",
+  "nonvoters",
+  "piraten",
+  "freie_waehler"
+)
+scale_color_party <- ggplot2::scale_color_manual(
+  name = "party",
+  values = party_colors
+)
+
+
 get_institute_names <- function() {
-  institute_links <- rvest::read_html(stringr::str_c(wahlrecht_base, "index.htm")) %>%
+  rvest::read_html(stringr::str_c(wahlrecht_base, "index.htm")) %>%
     rvest::html_elements(".wilko thead .in a") %>%
     rvest::html_attr("href") %>%
     stringr::str_extract("[^.]+")
 }
 
 get_all_institutes <- function() {
-  purrr::map(.x = get_institute_names(), .f = get_institute) %>%
-    dplyr::bind_rows()
+  get_institute_names() %>%
+    purrr::map_dfr(.f = get_institute)
 }
 
 get_institute <- function(institute_name) {
@@ -82,12 +113,45 @@ clean_data <- function(df) {
 df <- get_all_institutes()
 df_clean <- df %>%
   clean_data() %>%
-  dplyr::select(-dplyr::all_of(c(
-    "piraten",
-    "freie_waehler",
-    "nonvoters"
-  ))) %>%
-  tidyr::pivot_longer(cols = any_of(c("cdu_csu", "spd", "gruene", "fdp", "linke", "afd", "others", "nonvoters", "piraten", "freie_waehler")), names_to = "party") %>%
+  dplyr::select(
+    -dplyr::all_of(
+      c(
+        "piraten",
+        "freie_waehler",
+        "nonvoters",
+        "type"
+      )
+    )
+  ) %>%
+  tidyr::separate(
+    survey_period,
+    into = c("survey_period_begin", "survey_period_end"),
+    sep = "–",
+    fill = "right"
+  ) %>%
+  dplyr::mutate(survey_period_end = dplyr::coalesce(survey_period_end, survey_period_begin)) %>%
+  dplyr::mutate(
+    dplyr::across(
+      .cols = tidyselect::starts_with("survey_period_"),
+      .fns = ~ readr::parse_date(str_c(.x, lubridate::year(date)), format = "%d.%m.%Y")
+    )
+  ) %>%
+  tidyr::pivot_longer(
+    cols = any_of(
+      c(
+        "cdu_csu",
+        "spd",
+        "gruene",
+        "fdp",
+        "linke",
+        "afd",
+        "others",
+        "nonvoters",
+        "piraten",
+        "freie_waehler"
+      )
+    ), names_to = "party"
+  ) %>%
   dplyr::mutate(party = forcats::as_factor(party)) %>%
   tidyr::drop_na(value)
 
@@ -102,54 +166,13 @@ df_clean %>%
   ) +
   ggplot2::scale_x_date(
     breaks = scales::breaks_pretty(),
-    limits = c(readr::parse_date("2019-01-01"), NA)
+    limits = c(readr::parse_date("2017-09-25"), NA)
   ) +
   ggplot2::geom_smooth(
-    span = 0.025
+   # span = 0.025
   ) +
   ggplot2::geom_point(
     aes(shape = institute)
   ) +
   # ggplot2::facet_wrap(facets = vars(institute)) +
   scale_color_party
-
-party_colors <- c(
-  "#000000", # black
-  "#E3000F", # red (SPD Corporate Design Manual 4/2015)
-  "#46962b", # green (Das Grüne Corporate Design 1/2017)
-  "#ffed00", # yellow (FDP Gestaltungsrichtlinien 10/2016)
-  "#FF0000", # red (Zum Umgang mit der Marke DIE LINKE 5/2007)
-  "#009ee0", # light blue (AfD Corporate Design 3/2017)
-  "#808080", # grey
-  "#404040", # dark grey
-  "#FF8800", # orange (Styleguide Piratenpartei Deutschland 2015)
-  "#353A90" # blue (Corporate Identity Freie Wähler Hessen 2016)
-)
-names(party_colors) <- c(
-  "cdu_csu",
-  "spd",
-  "gruene",
-  "fdp",
-  "linke",
-  "afd",
-  "others",
-  "nonvoters",
-  "piraten",
-  "freie_waehler"
-)
-scale_color_party <- ggplot2::scale_color_manual(
-  name = "party",
-  values = party_colors
-)
-
-
-#   dplyr::mutate(dplyr::across(.cols = cdu_csu:respondents, .fns = ~ tidyr::replace_na(data = .x, replace = "0"))) %>%
-#   dplyr::mutate(dplyr::across(.cols = cdu_csu:respondents, .fns = ~ dplyr::if_else(.x == "–", "0", .x))) %>%
-#   dplyr::mutate(dplyr::across(.cols = cdu_csu:respondents, .fns = ~ readr::parse_number(.x, locale = locale(grouping_mark = ".")))) %>%
-#   tidyr::separate(timeframe, into = c("timeframe_begin", "timeframe_end"), sep = "–", fill = "right") %>%
-#   dplyr::mutate(timeframe_end = dplyr::coalesce(timeframe_end, timeframe_begin))
-
-
-# needs year
-# %>%
-#   dplyr::mutate(dplyr::across(.cols = dplyr::starts_with("timeframe_"), .fns = ~ readr::parse_date(.x, format = "%d.%m.")))
